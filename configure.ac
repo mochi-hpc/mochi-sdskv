@@ -134,6 +134,7 @@ if test "x${leveldb_backend}" == xyes ; then
             CPPFLAGS="$LEVELDB_CFLAGS $CPPFLAGS"
             CFLAGS="$LEVELDB_CFLAGS $CFLAGS"
             SERVER_DEPS_PKG="${SERVER_DEPS_PKG} leveldb"
+            AC_DEFINE([USE_LEVELDB], 1, [use leveldb backend])
         ], [
             # fall back to conventional tests if no pkgconfig
             AC_CHECK_HEADERS([leveldb/c.h], ,
