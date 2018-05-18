@@ -71,6 +71,7 @@ if BUILD_LEVELDB
 lib_libsdskv_server_la_SOURCES += src/datastore/leveldb_datastore.cc
 endif
 
+lib_libsdskv_server_la_LIBADD = @SERVER_LIBS_PKG@
 
 include_HEADERS = include/sdskv-client.h \
 		  include/sdskv-server.h \
