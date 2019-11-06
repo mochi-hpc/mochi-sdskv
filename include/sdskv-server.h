@@ -21,7 +21,7 @@ extern "C" {
 #define SDSKV_COMPARE_DEFAULT NULL
 
 typedef struct sdskv_server_context_t* sdskv_provider_t;
-typedef int (*sdskv_compare_fn)(const void*, size_t, const void*, size_t);
+typedef int (*sdskv_compare_fn)(const void*, hg_size_t, const void*, hg_size_t);
 
 typedef struct sdskv_config_t {
     const char*      db_name;         // name of the database
