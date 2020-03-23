@@ -24,6 +24,7 @@ check_PROGRAMS = test/sdskv-open-test              \
 		 test/sdskv-custom-cmp-test        \
 		 test/sdskv-migrate-test           \
 		 test/sdskv-multi-test             \
+		 test/sdskv-packed-test            \
 		 test/sdskv-cxx-test               \
 		 test/sdskv-custom-server-daemon
 
@@ -127,6 +128,7 @@ TESTS = test/basic.sh 		\
 	test/migrate-test.sh    \
 	test/custom-cmp-test.sh \
 	test/multi-test.sh \
+	test/packed-test.sh \
 	test/cxx-test.sh
 
 TESTS_ENVIRONMENT = TIMEOUT="$(TIMEOUT)" \
@@ -184,6 +186,10 @@ test_sdskv_migrate_test_LDFLAGS = -Llib -lsdskv-client
 test_sdskv_multi_test_SOURCES = test/sdskv-multi-test.cc
 test_sdskv_multi_test_DEPENDENCIES = lib/libsdskv-client.la
 test_sdskv_multi_test_LDFLAGS = -Llib -lsdskv-client
+
+test_sdskv_packed_test_SOURCES = test/sdskv-packed-test.cc
+test_sdskv_packed_test_DEPENDENCIES = lib/libsdskv-client.la
+test_sdskv_packed_test_LDFLAGS = -Llib -lsdskv-client
 
 test_sdskv_cxx_test_SOURCES = test/sdskv-cxx-test.cc
 test_sdskv_cxx_test_DEPENDENCIES = lib/libsdskv-client.la

@@ -43,14 +43,17 @@ struct sdskv_server_context_t
     hg_id_t sdskv_list_databases_id;
     hg_id_t sdskv_put_id;
     hg_id_t sdskv_put_multi_id;
+    hg_id_t sdskv_put_packed_id;
     hg_id_t sdskv_bulk_put_id;
     hg_id_t sdskv_get_id;
     hg_id_t sdskv_get_multi_id;
+    hg_id_t sdskv_get_packed_id;
     hg_id_t sdskv_exists_id;
     hg_id_t sdskv_erase_id;
     hg_id_t sdskv_erase_multi_id;
     hg_id_t sdskv_length_id;
     hg_id_t sdskv_length_multi_id;
+    hg_id_t sdskv_length_packed_id;
     hg_id_t sdskv_bulk_get_id;
     hg_id_t sdskv_list_keys_id;
     hg_id_t sdskv_list_keyvals_id;
@@ -79,10 +82,13 @@ DECLARE_MARGO_RPC_HANDLER(sdskv_count_db_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_list_db_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_put_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_put_multi_ult)
+DECLARE_MARGO_RPC_HANDLER(sdskv_put_packed_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_length_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_length_multi_ult)
+DECLARE_MARGO_RPC_HANDLER(sdskv_length_packed_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_get_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_get_multi_ult)
+DECLARE_MARGO_RPC_HANDLER(sdskv_get_packed_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_bulk_put_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_bulk_get_ult)
 DECLARE_MARGO_RPC_HANDLER(sdskv_list_keys_ult)
@@ -182,6 +188,12 @@ extern "C" int sdskv_provider_register(
     tmp_svr_ctx->sdskv_put_multi_id = rpc_id;
     margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
 
+    rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_put_packed_rpc",
+            put_packed_in_t, put_packed_out_t,
+            sdskv_put_packed_ult, provider_id, abt_pool);
+    tmp_svr_ctx->sdskv_put_packed_id = rpc_id;
+    margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
+
     rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_bulk_put_rpc",
             bulk_put_in_t, bulk_put_out_t,
             sdskv_bulk_put_ult, provider_id, abt_pool);
@@ -200,6 +212,12 @@ extern "C" int sdskv_provider_register(
     tmp_svr_ctx->sdskv_get_multi_id = rpc_id;
     margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
 
+    rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_get_packed_rpc",
+            get_packed_in_t, get_packed_out_t,
+            sdskv_get_packed_ult, provider_id, abt_pool);
+    tmp_svr_ctx->sdskv_get_packed_id = rpc_id;
+    margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
+
     rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_length_rpc",
             length_in_t, length_out_t,
             sdskv_length_ult, provider_id, abt_pool);
@@ -210,6 +228,12 @@ extern "C" int sdskv_provider_register(
             length_multi_in_t, length_multi_out_t,
             sdskv_length_multi_ult, provider_id, abt_pool);
     tmp_svr_ctx->sdskv_length_multi_id = rpc_id;
+    margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
+
+    rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_length_packed_rpc",
+            length_packed_in_t, length_packed_out_t,
+            sdskv_length_packed_ult, provider_id, abt_pool);
+    tmp_svr_ctx->sdskv_length_packed_id = rpc_id;
     margo_register_data(mid, rpc_id, (void*)tmp_svr_ctx, NULL);
 
     rpc_id = MARGO_REGISTER_PROVIDER(mid, "sdskv_exists_rpc",
@@ -787,6 +811,85 @@ static void sdskv_put_multi_ult(hg_handle_t handle)
 }
 DEFINE_MARGO_RPC_HANDLER(sdskv_put_multi_ult)
 
+static void sdskv_put_packed_ult(hg_handle_t handle)
+{
+    hg_return_t hret;
+    put_packed_in_t in;
+    put_packed_out_t out;
+    out.ret = SDSKV_SUCCESS;
+    std::vector<char> local_buffer;
+    hg_bulk_t local_bulk_handle;
+
+    auto r1 = at_exit([&handle]() { margo_destroy(handle); });
+    auto r2 = at_exit([&handle,&out]() { margo_respond(handle, &out); });
+
+    margo_instance_id mid = margo_hg_handle_get_instance(handle);
+    const struct hg_info* info = margo_get_info(handle);
+    sdskv_provider_t svr_ctx = 
+        (sdskv_provider_t)margo_registered_data(mid, info->id);
+    if(!svr_ctx) {
+        out.ret = SDSKV_ERR_UNKNOWN_PR;
+        return;
+    }
+
+    hret = margo_get_input(handle, &in);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r3 = at_exit([&handle,&in]() { margo_free_input(handle, &in); });
+
+    ABT_rwlock_rdlock(svr_ctx->lock);
+    auto it = svr_ctx->databases.find(in.db_id);
+    if(it == svr_ctx->databases.end()) {
+        ABT_rwlock_unlock(svr_ctx->lock); 
+        out.ret = SDSKV_ERR_UNKNOWN_DB;
+        return;
+    }
+    auto db = it->second;
+    ABT_rwlock_unlock(svr_ctx->lock);
+
+    // allocate a buffer to receive the keys and a buffer to receive the values
+    local_buffer.resize(in.bulk_size);
+    void* buf_ptr = local_buffer.data();
+    hg_size_t buf_size = in.bulk_size;
+
+    /* create bulk handle to receive keys */
+    hret = margo_bulk_create(mid, 1, &buf_ptr, &buf_size,
+            HG_BULK_WRITE_ONLY, &local_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r6 = at_exit([&local_bulk_handle]() { margo_bulk_free(local_bulk_handle); });
+
+    /* transfer data */
+    hret = margo_bulk_transfer(mid, HG_BULK_PULL, info->addr, in.bulk_handle, 0,
+            local_bulk_handle, 0, in.bulk_size);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+
+    /* interpret buffer as a list of key sizes */
+    hg_size_t* key_sizes = (hg_size_t*)local_buffer.data();
+    /* interpret buffer as a list of value sizes */
+    hg_size_t* val_sizes = key_sizes + in.num_keys;
+    /* interpret buffer as list of keys */
+    char* packed_keys = (char*)(val_sizes + in.num_keys);
+    /* compute the size of part of the buffer that contain keys */
+    size_t k=0;
+    for(unsigned i=0; i < in.num_keys; i++) k += key_sizes[i];
+    /* interpret the rest of the buffer as list of values */
+    char* packed_vals = packed_keys + k;
+
+    /* insert key/vals into the DB */
+    out.ret = db->put_packed(in.num_keys, packed_keys, key_sizes, packed_vals, val_sizes);
+
+    return;
+}
+DEFINE_MARGO_RPC_HANDLER(sdskv_put_packed_ult)
+
 static void sdskv_length_ult(hg_handle_t handle)
 {
     hg_return_t hret;
@@ -1052,6 +1155,134 @@ static void sdskv_get_multi_ult(hg_handle_t handle)
 }
 DEFINE_MARGO_RPC_HANDLER(sdskv_get_multi_ult)
 
+static void sdskv_get_packed_ult(hg_handle_t handle)
+{
+
+    hg_return_t hret;
+    get_packed_in_t in;
+    get_packed_out_t out;
+    out.ret = SDSKV_SUCCESS;
+    std::vector<char> local_keys_buffer;
+    std::vector<char> local_vals_buffer;
+    hg_bulk_t local_keys_bulk_handle;
+    hg_bulk_t local_vals_bulk_handle;
+
+    auto r1 = at_exit([&handle]() { margo_destroy(handle); });
+    auto r2 = at_exit([&handle,&out]() { margo_respond(handle, &out); });
+
+    /* get margo instance and provider */
+    margo_instance_id mid = margo_hg_handle_get_instance(handle);
+    const struct hg_info* info = margo_get_info(handle);
+    sdskv_provider_t svr_ctx = 
+        (sdskv_provider_t)margo_registered_data(mid, info->id);
+    if(!svr_ctx) {
+        out.ret = SDSKV_ERR_UNKNOWN_PR;
+        return;
+    }
+
+    /* deserialize input */
+    hret = margo_get_input(handle, &in);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r3 = at_exit([&handle,&in]() { margo_free_input(handle, &in); });
+
+    /* find the target database */
+    ABT_rwlock_rdlock(svr_ctx->lock);
+    auto it = svr_ctx->databases.find(in.db_id);
+    if(it == svr_ctx->databases.end()) {
+        ABT_rwlock_unlock(svr_ctx->lock);
+        out.ret = SDSKV_ERR_UNKNOWN_DB;
+        return;
+    }
+    auto db = it->second;
+    ABT_rwlock_unlock(svr_ctx->lock);
+
+    /* allocate buffers to receive the keys */
+    local_keys_buffer.resize(in.keys_bulk_size);
+    std::vector<void*> keys_addr(1);
+    keys_addr[0] = (void*)local_keys_buffer.data();
+    
+    /* create bulk handle to receive key sizes and packed keys */
+    hret = margo_bulk_create(mid, 1, keys_addr.data(), &in.keys_bulk_size,
+            HG_BULK_WRITE_ONLY, &local_keys_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r6 = at_exit([&local_keys_bulk_handle]() { margo_bulk_free(local_keys_bulk_handle); });
+
+    /* allocate buffer to send the values */
+    local_vals_buffer.resize(in.vals_bulk_size);
+    std::vector<void*> vals_addr(1);
+    vals_addr[0] = (void*)local_vals_buffer.data();
+
+    /* create bulk handle to receive max value sizes and to send values */
+    hret = margo_bulk_create(mid, 1, vals_addr.data(), &in.vals_bulk_size,
+            HG_BULK_READ_ONLY, &local_vals_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r7 = at_exit([&local_vals_bulk_handle]() { margo_bulk_free(local_vals_bulk_handle); });
+
+    /* transfer keys and key sizes */
+    hret = margo_bulk_transfer(mid, HG_BULK_PULL, info->addr, in.keys_bulk_handle, 0,
+            local_keys_bulk_handle, 0, in.keys_bulk_size);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+
+    /* interpret beginning of the key buffer as a list of key sizes */
+    hg_size_t* key_sizes = (hg_size_t*)local_keys_buffer.data();
+    /* find beginning of packed keys */
+    char* packed_keys = local_keys_buffer.data() + in.num_keys*sizeof(hg_size_t);
+    /* interpret beginning of the value buffer as a list of value sizes */
+    hg_size_t* val_sizes = (hg_size_t*)local_vals_buffer.data();
+    /* find beginning of region where to pack values */
+    char* packed_values = local_vals_buffer.data() + in.num_keys*sizeof(hg_size_t);
+
+    /* go through the key/value pairs and get the values from the database */
+    size_t available_client_memory = in.vals_bulk_size - in.num_keys*sizeof(hg_size_t);
+    unsigned i = 0;
+    for(unsigned i=0; i < in.num_keys; i++) {
+        ds_bulk_t kdata(packed_keys, packed_keys+key_sizes[i]);
+        ds_bulk_t vdata;
+        if(available_client_memory == 0) {
+            val_sizes[i] = 0;
+            out.ret = SDSKV_ERR_SIZE;
+            continue;
+        }
+        if(db->get(kdata, vdata)) {
+            if(vdata.size() > available_client_memory) {
+                available_client_memory = 0;
+                out.ret = SDSKV_ERR_SIZE;
+                val_sizes[i] = 0;
+            } else {
+                val_sizes[i] = vdata.size();
+                memcpy(packed_values, vdata.data(), val_sizes[i]);
+            }
+        } else {
+            val_sizes[i] = 0;
+        }
+        packed_keys += key_sizes[i];
+        packed_values += val_sizes[i];
+    }
+
+    /* do a PUSH operation to push back the values to the client */
+    hret = margo_bulk_transfer(mid, HG_BULK_PUSH, info->addr, in.vals_bulk_handle, 0,
+            local_vals_bulk_handle, 0, in.vals_bulk_size);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+
+    return;
+}
+DEFINE_MARGO_RPC_HANDLER(sdskv_get_packed_ult)
+
 static void sdskv_length_multi_ult(hg_handle_t handle)
 {
 
@@ -1162,6 +1393,115 @@ static void sdskv_length_multi_ult(hg_handle_t handle)
 }
 DEFINE_MARGO_RPC_HANDLER(sdskv_length_multi_ult)
 
+static void sdskv_length_packed_ult(hg_handle_t handle)
+{
+
+    hg_return_t hret;
+    length_packed_in_t in;
+    length_packed_out_t out;
+    out.ret = SDSKV_SUCCESS;
+    std::vector<char> local_keys_buffer;
+    std::vector<hg_size_t> local_vals_size_buffer;
+    hg_bulk_t local_keys_bulk_handle;
+    hg_bulk_t local_vals_size_bulk_handle;
+
+    auto r1 = at_exit([&handle]() { margo_destroy(handle); });
+    auto r2 = at_exit([&handle,&out]() { margo_respond(handle, &out); });
+
+    /* get margo instance and provider */
+    margo_instance_id mid = margo_hg_handle_get_instance(handle);
+    const struct hg_info* info = margo_get_info(handle);
+    sdskv_provider_t svr_ctx = 
+        (sdskv_provider_t)margo_registered_data(mid, info->id);
+    if(!svr_ctx) {
+        out.ret = SDSKV_ERR_UNKNOWN_PR;
+        return;
+    }
+
+    /* deserialize input */
+    hret = margo_get_input(handle, &in);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r3 = at_exit([&handle,&in]() { margo_free_input(handle, &in); });
+
+    /* find the target database */
+    ABT_rwlock_rdlock(svr_ctx->lock);
+    auto it = svr_ctx->databases.find(in.db_id);
+    if(it == svr_ctx->databases.end()) {
+        ABT_rwlock_unlock(svr_ctx->lock);
+        out.ret = SDSKV_ERR_UNKNOWN_DB;
+        return;
+    }
+    auto db = it->second;
+    ABT_rwlock_unlock(svr_ctx->lock);
+
+    /* allocate buffers to receive the keys and key sizes*/
+    local_keys_buffer.resize(in.in_bulk_size);
+    std::vector<void*> keys_addr(1);
+    keys_addr[0] = (void*)local_keys_buffer.data();
+    
+    /* create bulk handle to receive key sizes and packed keys */
+    hret = margo_bulk_create(mid, 1, keys_addr.data(), &in.in_bulk_size,
+            HG_BULK_WRITE_ONLY, &local_keys_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r6 = at_exit([&local_keys_bulk_handle]() { margo_bulk_free(local_keys_bulk_handle); });
+
+    /* allocate buffer to send the value sizes */
+    local_vals_size_buffer.resize(in.num_keys);
+    std::vector<void*> vals_sizes_addr(1);
+    hg_size_t local_vals_size_buffer_size = in.num_keys * sizeof(hg_size_t);
+    vals_sizes_addr[0] = (void*)local_vals_size_buffer.data();
+
+    /* create bulk handle to send values sizes */
+    hret = margo_bulk_create(mid, 1, vals_sizes_addr.data(), &local_vals_size_buffer_size,
+            HG_BULK_READ_ONLY, &local_vals_size_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+    auto r7 = at_exit([&local_vals_size_bulk_handle]() { margo_bulk_free(local_vals_size_bulk_handle); });
+
+    /* transfer keys and ksizes */
+    hret = margo_bulk_transfer(mid, HG_BULK_PULL, info->addr, in.in_bulk_handle, 0,
+            local_keys_bulk_handle, 0, in.in_bulk_size);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+
+    /* interpret beginning of the key buffer as a list of key sizes */
+    hg_size_t* key_sizes = (hg_size_t*)local_keys_buffer.data();
+    /* find beginning of packed keys */
+    char* packed_keys = local_keys_buffer.data() + in.num_keys*sizeof(hg_size_t);
+
+    /* go through the key/value pairs and get the values from the database */
+    for(unsigned i=0; i < in.num_keys; i++) {
+        ds_bulk_t kdata(packed_keys, packed_keys+key_sizes[i]);
+        ds_bulk_t vdata;
+        if(db->get(kdata, vdata)) {
+            local_vals_size_buffer[i] = vdata.size();
+        } else {
+            local_vals_size_buffer[i] = 0;
+        }
+        packed_keys += key_sizes[i];
+    }
+
+    /* do a PUSH operation to push back the value sizes to the client */
+    hret = margo_bulk_transfer(mid, HG_BULK_PUSH, info->addr, in.out_bulk_handle, 0,
+            local_vals_size_bulk_handle, 0, local_vals_size_buffer_size);
+    if(hret != HG_SUCCESS) {
+        out.ret = SDSKV_ERR_MERCURY;
+        return;
+    }
+
+    return;
+}
+DEFINE_MARGO_RPC_HANDLER(sdskv_length_packed_ult)
 
 static void sdskv_bulk_put_ult(hg_handle_t handle)
 {

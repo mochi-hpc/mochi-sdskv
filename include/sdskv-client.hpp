@@ -325,6 +325,39 @@ class client {
     }
 
     //////////////////////////
+    // PUT_PACKED methods
+    //////////////////////////
+
+    /**
+     * @brief Equivalent to sdskv_put_packed.
+     *
+     * @param db Database instance.
+     * @param count Number of key/val pairs.
+     * @param keys Buffer of keys.
+     * @param ksizes Array of key sizes.
+     * @param values Buffer of values.
+     * @param vsizes Array of value sizes.
+     */
+    void put_packed(const database& db,
+             hg_size_t count, const void* keys, const hg_size_t* ksizes,
+             const void* values, const hg_size_t *vsizes) const;
+
+    /**
+     * @brief Version of put taking std::strings instead of pointers.
+     *
+     * @param db Database instance.
+     * @param keys Vector of pointers to keys.
+     * @param ksizes Vector of key sizes.
+     * @param values Vector of pointers to values.
+     * @param vsizes Vector of value sizes.
+     */
+    inline void put_packed(const database& db,
+             const std::string& packed_keys, const std::vector<hg_size_t>& ksizes,
+             const std::string& packed_values, const  std::vector<hg_size_t>& vsizes) const {
+        put_packed(db, ksizes.size(), packed_keys.data(),  ksizes.data(), packed_values.data(), vsizes.data());
+    }
+
+    //////////////////////////
     // EXISTS methods
     //////////////////////////
 
@@ -443,6 +476,38 @@ class client {
         std::vector<hg_size_t> vsizes(keys.size());
         length_multi(db, keys, vsizes);
         return vsizes;
+    }
+
+    //////////////////////////
+    // LENGTH_PACKED methods
+    //////////////////////////
+
+    /**
+     * @brief Equivalent to sdskv_length_packed.
+     *
+     * @param db Database instance.
+     * @param num Number of keys.
+     * @param keys Packed keys.
+     * @param ksizes Array of key sizes.
+     * @param vsizes Resulting value sizes.
+     */
+    bool length_packed(const database& db,
+            hg_size_t num, const void* keys,
+            const hg_size_t* ksizes, hg_size_t* vsizes) const;
+
+    /**
+     * Version of length_packed that takes an std::string as packed buffer.
+     *
+     * @param db Database instance.
+     * @param keys Packed keys.
+     * @param vsizes Resulting vector of value sizes.
+     */
+    inline bool length_multi(const database& db,
+            const std::string& keys,
+            const std::vector<hg_size_t>& ksizes,
+            std::vector<hg_size_t>& vsizes) const {
+        vsizes.resize(ksizes.size());
+        return length_packed(db, ksizes.size(), keys.data(), ksizes.data(), vsizes.data());
     }
 
     //////////////////////////
@@ -651,6 +716,49 @@ class client {
         get_multi(db, keys, values);
         return values;
     }
+
+    //////////////////////////
+    // GET_PACKED methods
+    //////////////////////////
+
+    /**
+     * @brief Equivalent to sdskv_get_packed.
+     *
+     * @param db Database instance.
+     * @param count Number of key/val pairs.
+     * @param keys Buffer of packed keys.
+     * @param ksizes Array of key sizes.
+     * @param valbufsize Size of the value buffer.
+     * @param values Buffer of packed values.
+     * @param vsizes Array of sizes of value buffers.
+     */
+    bool get_packed(const database& db,
+             hg_size_t* count, const void* keys, const hg_size_t* ksizes,
+             hg_size_t valbufsize, void* values, hg_size_t *vsizes) const;
+
+    /**
+     * @brief Get multiple key/val pairs using std::string packed buffers
+     * and std::vector<hg_size_t> of sizes. The value buffer must be
+     * pre-allocated. vsizes will be resized to the right number of retrieved
+     * values.
+     *
+     * @param db Database instance.
+     * @param keys Vector of key addresses.
+     * @param ksizes Vector of key sizes.
+     * @param values Vector of value addresses.
+     * @param vsizes Vector of value sizes.
+     */
+    inline bool get_packed(const database& db,
+             const std::string& packed_keys, const std::vector<hg_size_t>& ksizes,
+             std::string& packed_values, std::vector<hg_size_t>& vsizes) const {
+        hg_size_t count = ksizes.size();
+        vsizes.resize(count);
+        bool b = get_packed(db, &count, packed_keys.data(), ksizes.data(),
+                packed_values.size(), const_cast<char*>(packed_values.data()), vsizes.data());
+        vsizes.resize(count);
+        return b;
+    }
+
 
     //////////////////////////
     // ERASE methods
@@ -1306,6 +1414,14 @@ class database {
     }
 
     /**
+     * @brief @see client::put_packed.
+     */
+    template<typename ... T>
+    void put_packed(T&& ... args) const {
+        m_ph.m_client->put_packed(*this, std::forward<T>(args)...);
+    }
+
+    /**
      * @brief @see client::length.
      */
     template<typename ... T>
@@ -1319,6 +1435,14 @@ class database {
     template<typename ... T>
     decltype(auto) length_multi(T&& ... args) const {
         return m_ph.m_client->length_multi(*this, std::forward<T>(args)...);
+    }
+
+    /**
+     * @brief @see client::length_packed.
+     */
+    template<typename ... T>
+    decltype(auto) length_packed(T&& ... args) const {
+        return m_ph.m_client->length_packed(*this, std::forward<T>(args)...);
     }
 
     /**
@@ -1336,6 +1460,15 @@ class database {
     decltype(auto) get_multi(T&& ... args) const {
         return m_ph.m_client->get_multi(*this, std::forward<T>(args)...);
     }
+    
+    /**
+     * @brief @see client::get_packed.
+     */
+    template<typename ... T>
+    decltype(auto) get_packed(T&& ... args) const {
+        return m_ph.m_client->get_packed(*this, std::forward<T>(args)...);
+    }
+
 
     /**
      * @brief @see client::exists
@@ -1438,6 +1571,14 @@ inline void client::put_multi(const database& db,
      _CHECK_RET(ret);
 }
 
+inline void client::put_packed(const database& db,
+        hg_size_t count, const void* keys, const hg_size_t* ksizes,
+        const void* values, const hg_size_t *vsizes) const {
+    int ret = sdskv_put_packed(db.m_ph.m_ph, db.m_db_id,
+            count, keys, ksizes, values, vsizes);
+     _CHECK_RET(ret);
+}
+
 inline hg_size_t client::length(const database& db,
         const void* key, hg_size_t ksize) const {
     hg_size_t vsize;
@@ -1463,6 +1604,15 @@ inline bool client::length_multi(const database& db,
     return true;
 }
 
+inline bool client::length_packed(const database& db,
+        hg_size_t num, const void* keys,
+        const hg_size_t* ksizes, hg_size_t* vsizes) const {
+    int ret = sdskv_length_packed(db.m_ph.m_ph, db.m_db_id,
+            num, keys, ksizes, vsizes);
+    _CHECK_RET(ret);
+    return true;
+}
+
 inline bool client::get(const database& db,
         const void* key, hg_size_t ksize,
         void* value, hg_size_t* vsize) const {
@@ -1477,6 +1627,15 @@ inline bool client::get_multi(const database& db,
         void** values, hg_size_t *vsizes) const {
     int ret = sdskv_get_multi(db.m_ph.m_ph, db.m_db_id,
             count, keys, ksizes, values, vsizes);
+    _CHECK_RET(ret);
+    return true;
+}
+
+inline bool client::get_packed(const database& db,
+        hg_size_t* count, const void* keys, const hg_size_t* ksizes,
+        hg_size_t valbufsize, void* values, hg_size_t *vsizes) const {
+    int ret = sdskv_get_packed(db.m_ph.m_ph, db.m_db_id,
+            count, keys, ksizes, valbufsize, values, vsizes);
     _CHECK_RET(ret);
     return true;
 }

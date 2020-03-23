@@ -41,6 +41,23 @@ class AbstractDataStore {
             }
             return ret;
         }
+        virtual int put_packed(hg_size_t num_items,
+                               const char* keys,
+                               const hg_size_t* ksizes,
+                               const char* values,
+                               const hg_size_t* vsizes)
+        {
+            int ret = 0;
+            size_t keys_offset = 0;
+            size_t vals_offset = 0;
+            for(hg_size_t i=0; i < num_items; i++) {
+                int r = put(keys+keys_offset, ksizes[i], values+vals_offset, vsizes[i]);
+                ret = ret == 0 ? r : 0;
+                keys_offset += ksizes[i];
+                vals_offset += vsizes[i];
+            }
+            return ret;
+        }
         virtual bool get(const ds_bulk_t &key, ds_bulk_t &data)=0;
         virtual bool get(const ds_bulk_t &key, std::vector<ds_bulk_t> &data)=0;
         virtual bool exists(const void* key, hg_size_t ksize) const = 0;

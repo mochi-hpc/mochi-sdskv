@@ -179,6 +179,28 @@ int sdskv_put_multi(sdskv_provider_handle_t provider,
         const void* const* values, const hg_size_t *vsizes);
 
 /**
+ * @brief Puts multiple key/value pairs into the database.
+ * This method will send all the key/value pairs in batch,
+ * thus optimizing transfers by avoiding many RPC round trips.
+ * This version of put_multi assumes that the keys are packed
+ * in back to back in a single buffer, and so are the values.
+ *
+ * @param provider provider handle managing the database
+ * @param db_id targeted database id
+ * @param num number of key/value pairs to put
+ * @param packed_keys buffer containing the keys
+ * @param ksizes array of key sizes
+ * @param packed_values buffer containing the values
+ * @param vsizes array of value sizes
+ *
+ * @return SDSKV_SUCCESS or error code defined in sdskv-common.h
+ */
+int sdskv_put_packed(sdskv_provider_handle_t provider,
+        sdskv_database_id_t db_id,
+        size_t num, const void* packed_keys, const hg_size_t *ksizes,
+        const void* packed_values, const hg_size_t *vsizes);
+
+/**
  * @brief Gets the value associated with a given key.
  * vsize needs to be set to the current size of the allocated
  * value buffer. After a succesful call to sdskv_get, vsize
@@ -237,6 +259,25 @@ int sdskv_get_multi(sdskv_provider_handle_t provider,
         void** values, hg_size_t *vsizes);
 
 /**
+ * @brief Get multiple values into a single packed buffer.
+ *
+ * @param[in] provider provider handle
+ * @param[in] db_id database id
+ * @param[inout] num number of values to retrieve, number of values actually retrieved
+ * @param[in] keys buffer of packed keys to retrieve
+ * @param[in] ksizes size of the keys
+ * @param[in] vbufsize size of the buffer allocated for the values
+ * @param[out] values buffer allocated to receive packed values
+ * @param[out] vsizes sizes of the values
+ *
+ * @return SDSKV_SUCCESS or error code defined in sdskv-common.h
+ */
+int sdskv_get_packed(sdskv_provider_handle_t provider,
+        sdskv_database_id_t db_id,
+        size_t* num, const void* packed_keys, const hg_size_t* ksizes,
+        hg_size_t vbufsize, void* packed_values, hg_size_t *vsizes);
+
+/**
  * @brief Gets the length of a value associated with a given key.
  *
  * @param[in] handle provider handle
@@ -269,6 +310,26 @@ int sdskv_length(sdskv_provider_handle_t handle,
 int sdskv_length_multi(sdskv_provider_handle_t handle,
         sdskv_database_id_t db_id, size_t num,
         const void* const* keys, const hg_size_t* ksizes,
+        hg_size_t *vsizes);
+
+/**
+ * @brief Gets the length of values associated with multiple keys.
+ * If a particular key does not exists, this function will set the length
+ * of its value to 0 (so the user needs another way to differenciate 
+ * between a key that does not exists and a 0-sized value).
+ *
+ * @param[in] handle provider handle
+ * @param[in] db_id database id
+ * @param[in] num number of keys
+ * @param[in] keys buffer of packed keys
+ * @param[in] ksizes array of key sizes
+ * @param[out] vsizes array where to put value sizes
+ *
+ * @return SDSKV_SUCCESS or error code defined in sdskv-common.h
+ */
+int sdskv_length_packed(sdskv_provider_handle_t handle,
+        sdskv_database_id_t db_id, size_t num,
+        const void* packed_keys, const hg_size_t* ksizes,
         hg_size_t *vsizes);
 
 /**

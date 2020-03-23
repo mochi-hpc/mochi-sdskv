@@ -14,14 +14,17 @@ struct sdskv_client {
     /* accessing database */
     hg_id_t sdskv_put_id;
     hg_id_t sdskv_put_multi_id;
+    hg_id_t sdskv_put_packed_id;
     hg_id_t sdskv_bulk_put_id;
     hg_id_t sdskv_get_id;
     hg_id_t sdskv_get_multi_id;
+    hg_id_t sdskv_get_packed_id;
     hg_id_t sdskv_exists_id;
     hg_id_t sdskv_erase_id;
     hg_id_t sdskv_erase_multi_id;
     hg_id_t sdskv_length_id;
     hg_id_t sdskv_length_multi_id;
+    hg_id_t sdskv_length_packed_id;
     hg_id_t sdskv_bulk_get_id;
     hg_id_t sdskv_list_keys_id;
     hg_id_t sdskv_list_keyvals_id;
@@ -59,14 +62,17 @@ static int sdskv_client_register(sdskv_client_t client, margo_instance_id mid)
         margo_registered_name(mid, "sdskv_list_databases_rpc",        &client->sdskv_list_databases_id,        &flag);
         margo_registered_name(mid, "sdskv_put_rpc",                   &client->sdskv_put_id,                   &flag);
         margo_registered_name(mid, "sdskv_put_multi_rpc",             &client->sdskv_put_multi_id,             &flag);
+        margo_registered_name(mid, "sdskv_put_packed_rpc",            &client->sdskv_put_packed_id,            &flag);
         margo_registered_name(mid, "sdskv_bulk_put_rpc",              &client->sdskv_bulk_put_id,              &flag);
         margo_registered_name(mid, "sdskv_get_rpc",                   &client->sdskv_get_id,                   &flag);
         margo_registered_name(mid, "sdskv_get_multi_rpc",             &client->sdskv_get_multi_id,             &flag);
+        margo_registered_name(mid, "sdskv_get_packed_rpc",            &client->sdskv_get_packed_id,            &flag);
         margo_registered_name(mid, "sdskv_erase_rpc",                 &client->sdskv_erase_id,                 &flag);
         margo_registered_name(mid, "sdskv_erase_multi_rpc",           &client->sdskv_erase_multi_id,           &flag);
         margo_registered_name(mid, "sdskv_exists_rpc",                &client->sdskv_exists_id,                &flag);
         margo_registered_name(mid, "sdskv_length_rpc",                &client->sdskv_length_id,                &flag);
         margo_registered_name(mid, "sdskv_length_multi_rpc",          &client->sdskv_length_multi_id,          &flag);
+        margo_registered_name(mid, "sdskv_length_packed_rpc",         &client->sdskv_length_packed_id,         &flag);
         margo_registered_name(mid, "sdskv_bulk_get_rpc",              &client->sdskv_bulk_get_id,              &flag);
         margo_registered_name(mid, "sdskv_list_keys_rpc",             &client->sdskv_list_keys_id,             &flag);
         margo_registered_name(mid, "sdskv_list_keyvals_rpc",          &client->sdskv_list_keyvals_id,          &flag);
@@ -88,12 +94,16 @@ static int sdskv_client_register(sdskv_client_t client, margo_instance_id mid)
             MARGO_REGISTER(mid, "sdskv_put_rpc", put_in_t, put_out_t, NULL);
         client->sdskv_put_multi_id =
             MARGO_REGISTER(mid, "sdskv_put_multi_rpc", put_multi_in_t, put_multi_out_t, NULL);
+        client->sdskv_put_packed_id =
+            MARGO_REGISTER(mid, "sdskv_put_packed_rpc", put_packed_in_t, put_packed_out_t, NULL);
         client->sdskv_bulk_put_id =
             MARGO_REGISTER(mid, "sdskv_bulk_put_rpc", bulk_put_in_t, bulk_put_out_t, NULL);
         client->sdskv_get_id =
             MARGO_REGISTER(mid, "sdskv_get_rpc", get_in_t, get_out_t, NULL);
         client->sdskv_get_multi_id =
             MARGO_REGISTER(mid, "sdskv_get_multi_rpc", get_multi_in_t, get_multi_out_t, NULL);
+        client->sdskv_get_packed_id =
+            MARGO_REGISTER(mid, "sdskv_get_packed_rpc", get_packed_in_t, get_packed_out_t, NULL);
         client->sdskv_erase_id =
             MARGO_REGISTER(mid, "sdskv_erase_rpc", erase_in_t, erase_out_t, NULL);
         client->sdskv_erase_multi_id =
@@ -104,6 +114,8 @@ static int sdskv_client_register(sdskv_client_t client, margo_instance_id mid)
             MARGO_REGISTER(mid, "sdskv_length_rpc", length_in_t, length_out_t, NULL);
         client->sdskv_length_multi_id = 
             MARGO_REGISTER(mid, "sdskv_length_multi_rpc", length_multi_in_t, length_multi_out_t, NULL);
+        client->sdskv_length_packed_id = 
+            MARGO_REGISTER(mid, "sdskv_length_packed_rpc", length_packed_in_t, length_packed_out_t, NULL);
         client->sdskv_bulk_get_id =
             MARGO_REGISTER(mid, "sdskv_bulk_get_rpc", bulk_get_in_t, bulk_get_out_t, NULL);
         client->sdskv_list_keys_id =
@@ -582,6 +594,77 @@ finish:
     return ret;
 }
 
+int sdskv_put_packed(sdskv_provider_handle_t provider,
+        sdskv_database_id_t db_id,
+        size_t num, const void* packed_keys, const hg_size_t *ksizes,
+        const void* packed_values, const hg_size_t *vsizes)
+{
+    hg_return_t hret;
+    int ret = SDSKV_SUCCESS;
+    hg_handle_t handle;
+
+    put_packed_in_t in;
+    put_packed_out_t out;
+
+    in.db_id = db_id;
+    in.num_keys = num;
+
+    hg_size_t keys_buffer_size = 0;
+    hg_size_t vals_buffer_size = 0;
+    unsigned i=0;
+    for(i=0; i < num; i++) {
+        keys_buffer_size += ksizes[i];
+        vals_buffer_size += vsizes[i];
+    }
+    in.bulk_size = keys_buffer_size + vals_buffer_size + 2*num*sizeof(size_t);
+
+    hg_size_t seg_sizes[4] = { num*sizeof(size_t), num*sizeof(size_t), keys_buffer_size, vals_buffer_size };
+    void* seg_ptrs[4] = { (void*)ksizes, (void*)vsizes, (void*)packed_keys, (void*)packed_values };
+    int num_seg = vals_buffer_size == 0 ? 3 : 4;
+
+    hret = margo_bulk_create(provider->client->mid, num_seg, seg_ptrs, seg_sizes,
+                             HG_BULK_READ_ONLY, &in.bulk_handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_bulk_create() failed in sdskv_put_packed()\n");
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* create handle */
+    hret = margo_create(
+            provider->client->mid,
+            provider->addr,
+            provider->client->sdskv_put_packed_id,
+            &handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_create() failed in sdskv_put_packed()\n");
+        margo_bulk_free(in.bulk_handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    hret = margo_provider_forward(provider->provider_id, handle, &in);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_forward() failed in sdskv_put_packed()\n");
+        margo_bulk_free(in.bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    hret = margo_get_output(handle, &out);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_get_output() failed in sdskv_put_packed()\n");
+        margo_bulk_free(in.bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    ret = out.ret;
+    margo_free_output(handle, &out);
+    margo_bulk_free(in.bulk_handle);
+
+    margo_destroy(handle);
+    return ret;
+}
+
 int sdskv_get(sdskv_provider_handle_t provider,
         sdskv_database_id_t db_id, 
         const void *key, hg_size_t ksize,
@@ -1001,6 +1084,187 @@ finish:
     margo_bulk_free(in.vals_size_bulk_handle);
     free(key_seg_sizes);
     free(key_seg_ptrs);
+    margo_destroy(handle);
+    return ret;
+}
+
+int sdskv_length_packed(sdskv_provider_handle_t provider, 
+        sdskv_database_id_t db_id, size_t num, const void *packed_keys, 
+        const hg_size_t* ksizes, hg_size_t* vsizes)
+{
+    hg_return_t hret;
+    int ret;
+    hg_handle_t handle;
+
+    length_packed_in_t in;
+    length_packed_out_t out;
+
+    in.db_id = db_id;
+    in.num_keys = num;
+    in.in_bulk_size = 0;
+    in.in_bulk_handle = HG_BULK_NULL;
+    in.out_bulk_handle = HG_BULK_NULL;
+
+    hg_size_t total_ksize = 0;
+    unsigned i=0;
+    for(i = 0; i < num; i++) {
+        total_ksize += ksizes[i];
+    }
+
+    /* create bulk handle to expose the packed_keys and ksizes */
+    void* seg_ptrs[2] = { (void*)ksizes, (void*)packed_keys };
+    hg_size_t seg_sizes[2] = { num*sizeof(hg_size_t), total_ksize };
+    in.in_bulk_size = total_ksize + num*sizeof(hg_size_t);
+
+    hret = margo_bulk_create(provider->client->mid, 2, seg_ptrs, seg_sizes,
+            HG_BULK_READ_ONLY, &in.in_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_bulk_create() for keys/ksizes failed in sdskv_length_packed()\n");
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* create bulk handle to expose the vsizes */
+    hg_size_t val_size_buf_size = num*sizeof(hg_size_t);
+    hret = margo_bulk_create(provider->client->mid, 1, (void**)(&vsizes), &val_size_buf_size,
+            HG_BULK_WRITE_ONLY, &in.out_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_bulk_create() for vsizes failed in sdskv_length_packed()\n");
+        margo_bulk_free(in.in_bulk_handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* create RPC handle */
+    hret = margo_create(
+            provider->client->mid,
+            provider->addr,
+            provider->client->sdskv_length_packed_id,
+            &handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_create() failed in sdskv_length_packed()\n");
+        margo_bulk_free(in.in_bulk_handle);
+        margo_bulk_free(in.out_bulk_handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* forward RPC */
+    hret = margo_provider_forward(provider->provider_id, handle, &in);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_provider_forward() failed in sdskv_length_packed()\n");
+        margo_bulk_free(in.in_bulk_handle);
+        margo_bulk_free(in.out_bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* Get output */
+    hret = margo_get_output(handle, &out);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_get_output() failed in sdskv_length_packed()\n");
+        margo_bulk_free(in.in_bulk_handle);
+        margo_bulk_free(in.out_bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    ret = out.ret;
+    margo_bulk_free(in.in_bulk_handle);
+    margo_bulk_free(in.out_bulk_handle);
+    margo_free_output(handle, &out);
+    margo_destroy(handle);
+    return ret;
+}
+
+int sdskv_get_packed(sdskv_provider_handle_t provider,
+        sdskv_database_id_t db_id,
+        size_t* num, const void* packed_keys, const hg_size_t* ksizes,
+        hg_size_t vbufsize, void* packed_vals, hg_size_t *vsizes)
+{
+    hg_return_t hret;
+    int ret;
+    hg_handle_t handle;
+
+    get_packed_in_t in;
+    get_packed_out_t out;
+
+    in.db_id = db_id;
+    in.num_keys = *num;
+    in.keys_bulk_size = 0;
+    in.keys_bulk_handle = HG_BULK_NULL;
+    in.vals_bulk_size = 0;
+    in.vals_bulk_handle = HG_BULK_NULL;
+
+    hg_size_t total_ksize = 0;
+    unsigned i=0;
+    for(i = 0; i < *num; i++) {
+        total_ksize += ksizes[i];
+    }
+
+    /* create bulk handle to expose the packed_keys and ksizes */
+    void* seg_ptrs[2] = { (void*)ksizes, (void*)packed_keys };
+    hg_size_t seg_sizes[2] = { (*num)*sizeof(hg_size_t), total_ksize };
+    in.keys_bulk_size = total_ksize + (*num)*sizeof(hg_size_t);
+
+    hret = margo_bulk_create(provider->client->mid, 2, seg_ptrs, seg_sizes,
+            HG_BULK_READ_ONLY, &in.keys_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_bulk_create() for keys/ksizes failed in sdskv_get_packed()\n");
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* create bulk handle to expose the packed_vals and vsizes */
+    seg_ptrs[0] = (void*)vsizes;
+    seg_ptrs[1] = (void*)packed_vals;
+    seg_sizes[0] = (*num)*sizeof(hg_size_t);
+    seg_sizes[1] = vbufsize;
+    in.vals_bulk_size = (*num)*sizeof(hg_size_t) + vbufsize;
+
+    hret = margo_bulk_create(provider->client->mid, 2, seg_ptrs, seg_sizes,
+            HG_BULK_WRITE_ONLY, &in.vals_bulk_handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_bulk_create() for vals/vsizes failed in sdskv_get_packed()\n");
+        margo_bulk_free(in.keys_bulk_handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* create RPC handle */
+    hret = margo_create(
+            provider->client->mid,
+            provider->addr,
+            provider->client->sdskv_get_packed_id,
+            &handle);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_create() failed in sdskv_get_packed()\n");
+        margo_bulk_free(in.keys_bulk_handle);
+        margo_bulk_free(in.vals_bulk_handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* forward RPC */
+    hret = margo_provider_forward(provider->provider_id, handle, &in);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_provider_forward() failed in sdskv_get_packed()\n");
+        margo_bulk_free(in.keys_bulk_handle);
+        margo_bulk_free(in.vals_bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    /* Get output */
+    hret = margo_get_output(handle, &out);
+    if(hret != HG_SUCCESS) {
+        fprintf(stderr,"[SDSKV] margo_get_output() failed in sdskv_get_packed()\n");
+        margo_bulk_free(in.keys_bulk_handle);
+        margo_bulk_free(in.vals_bulk_handle);
+        margo_destroy(handle);
+        return SDSKV_ERR_MERCURY;
+    }
+
+    ret = out.ret;
+    *num = out.num_keys;
+
+    margo_bulk_free(in.keys_bulk_handle);
+    margo_bulk_free(in.vals_bulk_handle);
+    margo_free_output(handle, &out);
     margo_destroy(handle);
     return ret;
 }
