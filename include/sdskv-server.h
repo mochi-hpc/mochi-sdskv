@@ -36,12 +36,24 @@ typedef struct sdskv_config_t {
 typedef void (*sdskv_pre_migration_callback_fn)(sdskv_provider_t, const sdskv_config_t*, void*);
 typedef void (*sdskv_post_migration_callback_fn)(sdskv_provider_t, const sdskv_config_t*, sdskv_database_id_t, void*);
 
+
+/**
+ * The bake_provider_init_info structure can be passed in to the
+ * bake_provider_register() function to configure the provider. The struct
+ * can be memset to zero to use default values.
+ */
+struct sdskv_provider_init_info {
+    const char *json_config;
+    ABT_pool    rpc_pool;
+};
+#define SDSKV_PROVIDER_INIT_INFO_INIT {NULL, ABT_POOL_NULL}
 /**
  * @brief Creates a new provider.
  *
  * @param[in] mid Margo instance
  * @param[in] provider_id provider id
  * @param[in] pool Argobots pool
+ * @param[in] json_config Json string
  * @param[out] provider provider handle
  *
  * @return SDSKV_SUCCESS or error code defined in sdskv-common.h
@@ -49,9 +61,19 @@ typedef void (*sdskv_post_migration_callback_fn)(sdskv_provider_t, const sdskv_c
 int sdskv_provider_register(
         margo_instance_id mid,
         uint16_t provider_id,
-        ABT_pool pool,
+        const struct sdskv_provider_init_info * args,
         sdskv_provider_t* provider);
 
+/**
+ * @brief Obtain a JSON string describing provider's configuration
+ *
+ */
+char * sdskv_provider_get_config(sdskv_provider_t provider);
+
+/**
+ * @brief Obtain underlying margo identifier
+ */
+margo_instance_id sdskv_provider_get_mid(sdskv_provider_t provider);
 /**
  * @brief Deregister the provider's RPCs and destroys the provider.
  *
@@ -75,6 +97,19 @@ int sdskv_provider_add_comparison_function(
         const char* function_name,
         sdskv_compare_fn comp_fn);
 
+/**
+ * @brief
+ * @pram provider provider
+ * @pram library dynamically loaded library containing comparison function
+ * @param function_name name of function to load from library
+ *
+ * @return SDSKV_SUCCES or error code defined in sdskv-common.h
+ */
+
+int sdskv_provider_find_comparison_function(
+        sdskv_provider_t provider,
+        const char* library,
+        const char* function_name);
 /**
  * Makes the provider start managing a database. The database will
  * be created if it does not exist. Otherwise, the provider will start
